@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Logo（沿用 zt-vue 智瞳 Logo 作占位，产品命名确定后替换）
+       眼：上下眼睑为中心对称的两笔，一端伸入、一端送出，寓意数据开放（上游接入 → 加工 → 交付下游），整体隐含“Z”（智 / zt）；
+       菱形瞳孔：数据单元与数据产品，规整可信；中心亮点：数据核心与安全可信；
+       蓝青渐变：科技与可信，管理后台与客户控制台共用 -->
+  <defs>
+    <linearGradient id="zt-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2B6BFF"/>
+      <stop offset="1" stop-color="#00C2D4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#zt-bg)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="4.6" stroke-linecap="round">
+    <path d="M10 31 C17 18.5 41 17 49 25"/>
+    <path d="M54 33 C47 45.5 23 47 15 39"/>
+  </g>
+  <rect x="26" y="26" width="12" height="12" rx="2.4" transform="rotate(45 32 32)" fill="#FFFFFF"/>
+  <circle cx="32" cy="32" r="2.7" fill="#1E6BFF"/>
+</svg>
