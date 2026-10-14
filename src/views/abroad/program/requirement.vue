@@ -26,7 +26,13 @@
         <el-button type="danger" plain icon="Delete" :disabled="!current" @click="handleDelete" v-hasPermi="['abroad:program:edit']">删除本季</el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button type="primary" icon="Check" :disabled="!current" :loading="saving" @click="submitForm" v-hasPermi="['abroad:program:edit']">保存本季</el-button>
+        <el-button type="warning" plain icon="MagicStick" :disabled="!current" @click="openAiPrefill" v-hasPermi="['abroad:program:edit']">AI 预填</el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button type="primary" icon="Check" :disabled="!current || aiPendingCount > 0 || aiRunning" :loading="saving" @click="submitForm" v-hasPermi="['abroad:program:edit']">保存本季</el-button>
+      </el-col>
+      <el-col :span="1.5" v-if="aiPendingCount > 0">
+        <span class="ai-pending-hint">还有 {{ aiPendingCount }} 个 AI 预填字段未确认</span>
       </el-col>
     </el-row>
 
@@ -40,6 +46,20 @@
           </template>
         </el-tab-pane>
       </el-tabs>
+
+      <ai-prefill-panel
+        v-if="aiOpen && current"
+        :program="program"
+        :result="aiResult"
+        :current-values="aiCurrentValues"
+        :target-matches="aiTargetMatches"
+        :initial-url="program.website || ''"
+        @result="onAiResult"
+        @apply="applyAiField"
+        @running="v => (aiRunning = v)"
+        @program-updated="getProgramInfo"
+        @close="aiOpen = false"
+      />
 
       <el-form v-if="current" :key="current.uid" ref="requirementRef" :model="current" :rules="rules" label-width="110px" class="requirement-form">
         <el-row>
@@ -229,8 +249,9 @@
           <el-input v-model="current.remark" type="textarea" :rows="2" placeholder="请输入内容" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" icon="Check" :loading="saving" @click="submitForm" v-hasPermi="['abroad:program:edit']">保存本季</el-button>
-          <span class="save-hint">带 <span class="required-star">*</span> 的来源：对应字段有值时必须填写官网链接</span>
+          <el-button type="primary" icon="Check" :loading="saving" :disabled="aiPendingCount > 0 || aiRunning" @click="submitForm" v-hasPermi="['abroad:program:edit']">保存本季</el-button>
+          <span v-if="aiPendingCount > 0" class="ai-pending-hint">还有 {{ aiPendingCount }} 个 AI 预填字段未确认，确认、修改或忽略后才能保存</span>
+          <span v-else class="save-hint">带 <span class="required-star">*</span> 的来源：对应字段有值时必须填写官网链接</span>
         </el-form-item>
       </el-form>
     </div>
@@ -267,6 +288,7 @@
 import { getProgram } from "@/api/abroad/program"
 import { listRequirement, addRequirement, updateRequirement, delRequirement } from "@/api/abroad/requirement"
 import SourceField from "./sourceField"
+import AiPrefillPanel from "./aiPrefillPanel"
 
 const { proxy } = getCurrentInstance()
 const route = useRoute()
@@ -334,6 +356,11 @@ const saving = ref(false)
 const programId = ref(Number(route.params.programId))
 let uidSeq = 0
 
+/** AI 预填：面板开关、结果（含目标申请季 targetUid）、进行中 */
+const aiOpen = ref(false)
+const aiResult = ref(null)
+const aiRunning = ref(false)
+
 const data = reactive({
   seasonDialog: { open: false, copy: false, year: undefined, intake: "fall", copyFrom: undefined },
   rules: {
@@ -347,6 +374,23 @@ const data = reactive({
 const { seasonDialog, rules } = toRefs(data)
 
 const current = computed(() => editors.value.find(ed => ed.uid === activeUid.value))
+
+/** 当前申请季是否为 AI 预填的目标申请季 */
+const aiTargetMatches = computed(() => !aiResult.value || (!!current.value && aiResult.value.targetUid === current.value.uid))
+
+/** 当前申请季还未处理（确认 / 修改 / 忽略）的 AI 预填字段数 */
+const aiPendingCount = computed(() => {
+  if (!aiResult.value || !current.value || aiResult.value.targetUid !== current.value.uid) {
+    return 0
+  }
+  return aiResult.value.fields.filter(f => f.target === "requirement" && f.state === "pending").length
+})
+
+/** 当前申请季各字段的取值（AI 预填面板显示“当前”值用） */
+const aiCurrentValues = computed(() => {
+  const ed = current.value
+  return ed ? { ...toValues(ed), prerequisitesRequired: ed.prerequisitesRequired } : {}
+})
 
 /** 空值判断（null / undefined / 空串） */
 function isBlank(v) {
@@ -435,7 +479,9 @@ function toEditor(r) {
     rounds: (dl.rounds || []).map(x => ({ name: x.name || "", date: x.date || "" })),
     sources: sources,
     sourceErrors: {},
-    fieldErrors: {}
+    fieldErrors: {},
+    // AI 预填“确认”时的取值快照：保存时取值已被改动的，来源方式改为人工
+    aiConfirmed: {}
   }
 }
 
@@ -493,7 +539,11 @@ function toPayload(ed) {
   Object.keys(FIELD_LABELS).forEach(f => {
     const s = ed.sources[f]
     if (!isBlank(values[f]) && !isBlank(s.sourceUrl)) {
-      sources.push({ fieldName: f, sourceUrl: s.sourceUrl.trim(), quote: isBlank(s.quote) ? null : s.quote.trim(), origin: s.origin || "0" })
+      let origin = s.origin || "0"
+      if (origin === "1" && ed.aiConfirmed && ed.aiConfirmed[f] !== undefined && ed.aiConfirmed[f] !== values[f]) {
+        origin = "0"
+      }
+      sources.push({ fieldName: f, sourceUrl: s.sourceUrl.trim(), quote: isBlank(s.quote) ? null : s.quote.trim(), origin: origin })
     }
   })
   return {
@@ -727,6 +777,10 @@ function submitForm() {
   if (!ed) {
     return
   }
+  if (aiPendingCount.value > 0) {
+    proxy.$modal.msgWarning("还有 " + aiPendingCount.value + " 个 AI 预填字段未确认，请逐个确认、修改或忽略")
+    return
+  }
   proxy.$refs["requirementRef"].validate(valid => {
     if (!valid) {
       return
@@ -748,6 +802,10 @@ function submitForm() {
     req.then(() => {
       // 保存后读回，逐字段比对
       return getList(payload.season).then(list => {
+        // 保存后编辑器重建：AI 预填结果跟随到同一申请季
+        if (aiResult.value && aiResult.value.targetUid === ed.uid) {
+          aiResult.value.targetUid = activeUid.value
+        }
         const saved = (list || []).find(r => r.season === payload.season)
         const diffs = saved ? compareReadBack(payload, saved) : ["整条记录"]
         if (diffs.length) {
@@ -769,6 +827,9 @@ function handleDelete() {
   if (!ed) {
     return
   }
+  if (aiResult.value && aiResult.value.targetUid === ed.uid && !ed.requirementId) {
+    aiResult.value = null
+  }
   if (!ed.requirementId) {
     editors.value = editors.value.filter(x => x.uid !== ed.uid)
     activeUid.value = editors.value.length ? editors.value[0].uid : ""
@@ -777,11 +838,87 @@ function handleDelete() {
   proxy.$modal.confirm('是否确认删除申请季"' + ed.season + '"的申请要求？').then(function() {
     return delRequirement(ed.requirementId)
   }).then(() => {
+    if (aiResult.value && aiResult.value.targetUid === ed.uid) {
+      aiResult.value = null
+    }
     editors.value = editors.value.filter(x => x.uid !== ed.uid)
     activeUid.value = ""
     getList()
     proxy.$modal.msgSuccess("删除成功")
   }).catch(() => {})
+}
+
+/** 打开 AI 预填面板（需要先有申请季：申请要求字段写入当前申请季） */
+function openAiPrefill() {
+  if (!current.value) {
+    proxy.$modal.msgWarning("请先新增申请季")
+    return
+  }
+  aiOpen.value = true
+}
+
+/** 收到 AI 预填结果：绑定到当前申请季 */
+function onAiResult(data) {
+  data.targetUid = current.value.uid
+  data.targetSeason = current.value.season
+  aiResult.value = data
+}
+
+/**
+ * 把 AI 预填的取值写入当前申请季表单并带上来源
+ * @param payload { field: 预填字段, mode: confirm（来源方式 AI 预填）| edit（写入后人工修改，来源方式人工）, url: 来源页面 }
+ */
+function applyAiField(payload) {
+  const ed = current.value
+  const f = payload.field
+  const v = f.value
+  switch (f.fieldName) {
+    case "minGpa":
+      ed.gpa = { ...v }
+      break
+    case "tiersNotAccepted":
+      ed.tiersNotAccepted = [...v]
+      break
+    case "otherLanguage":
+      ed.otherLangs = Object.keys(v).map(k => ({
+        test: k,
+        overall: v[k].overall ?? null,
+        minSub: v[k].minSub ?? null,
+        level: v[k].level ?? "",
+        note: v[k].note ?? ""
+      }))
+      break
+    case "testDetail":
+      ed.test = { ...ed.test, gre: v.gre ?? null, gmat_focus: v.gmat_focus ?? null, gmat_classic: v.gmat_classic ?? null }
+      break
+    case "deadlines":
+      ed.rolling = !!v.rolling
+      ed.rounds = (v.rounds || []).map(x => ({ name: x.name || "", date: x.date || "" }))
+      break
+    default:
+      ed[f.fieldName] = v
+  }
+  const source = ed.sources[f.fieldName]
+  if (source) {
+    source.sourceUrl = payload.url
+    source.quote = f.quote || ""
+    source.origin = payload.mode === "confirm" ? "1" : "0"
+    delete ed.sourceErrors[f.fieldName]
+    ed.aiConfirmed[f.fieldName] = toValues(ed)[f.fieldName]
+  }
+  delete ed.fieldErrors[f.fieldName]
+  if (payload.mode === "edit") {
+    // 修改：定位到表单中的字段，录入者在原位改值
+    nextTick(() => {
+      const anchor = f.fieldName === "prerequisitesRequired" ? "prerequisites" : f.fieldName
+      const el = document.querySelector('.requirement-form [data-source-field="' + anchor + '"]')
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        el.classList.add("ai-flash")
+        setTimeout(() => el.classList.remove("ai-flash"), 1600)
+      }
+    })
+  }
 }
 
 /** 返回项目列表 */
@@ -794,6 +931,8 @@ function goBack() {
 function init() {
   editors.value = []
   activeUid.value = ""
+  aiOpen.value = false
+  aiResult.value = null
   getProgramInfo()
   getList()
 }
@@ -859,5 +998,15 @@ init()
 }
 .required-star {
   color: var(--el-color-danger);
+}
+.ai-pending-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  line-height: 32px;
+  color: var(--el-color-warning);
+}
+.requirement-form :deep(.ai-flash) {
+  outline: 2px solid var(--el-color-primary-light-3);
+  transition: outline 0.3s;
 }
 </style>
