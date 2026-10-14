@@ -65,6 +65,9 @@
         <el-button type="danger" plain icon="Delete" :disabled="multiple" @click="handleDelete" v-hasPermi="['abroad:program:remove']">删除</el-button>
       </el-col>
       <el-col :span="1.5">
+        <el-button type="info" plain icon="Upload" @click="handleImport" v-hasPermi="['abroad:program:import']">导入</el-button>
+      </el-col>
+      <el-col :span="1.5">
         <el-button type="warning" plain icon="Download" @click="handleExport" v-hasPermi="['abroad:program:export']">导出</el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
@@ -140,6 +143,9 @@
       v-model:limit="queryParams.pageSize"
       @pagination="getList"
     />
+
+    <!-- 批量导入对话框（上传 → 预览 → 确认） -->
+    <import-dialog ref="importRef" @success="handleImportSuccess" />
 
     <!-- 添加或修改项目对话框 -->
     <el-dialog :title="title" v-model="open" width="760px" append-to-body>
@@ -258,6 +264,7 @@
 <script setup name="Program">
 import { listProgram, getProgram, delProgram, addProgram, updateProgram } from "@/api/abroad/program"
 import { listSchool } from "@/api/abroad/school"
+import ImportDialog from "./importDialog"
 
 const { proxy } = getCurrentInstance()
 const route = useRoute()
@@ -464,6 +471,17 @@ function handleExport() {
   proxy.download("abroad/program/export", {
     ...queryParams.value
   }, `program_${new Date().getTime()}.xlsx`)
+}
+
+/** 导入按钮操作 */
+function handleImport() {
+  proxy.$refs["importRef"].open()
+}
+
+/** 导入完成：刷新院校下拉与列表 */
+function handleImportSuccess() {
+  getSchoolOptions()
+  getList()
 }
 
 /** 从院校页跳转时带 schoolId 过滤 */

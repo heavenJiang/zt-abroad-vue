@@ -42,3 +42,11 @@ export function delProgram(programId) {
     method: 'delete'
   })
 }
+
+// 确认导入项目（预览返回的 token，30 分钟内有效，只能使用一次）
+export function importConfirm(token) {
+  return request({
+    url: '/abroad/program/importConfirm/' + token,
+    method: 'post'
+  })
+}
