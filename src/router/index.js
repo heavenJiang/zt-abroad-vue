@@ -151,6 +151,20 @@ export const dynamicRoutes = [
     ]
   },
   {
+    path: '/abroad/program-requirement',
+    component: Layout,
+    hidden: true,
+    permissions: ['abroad:program:edit'],
+    children: [
+      {
+        path: 'index/:programId(\\d+)',
+        component: () => import('@/views/abroad/program/requirement'),
+        name: 'ProgramRequirement',
+        meta: { title: '申请要求', activeMenu: '/catalog/program', noCache: true }
+      }
+    ]
+  },
+  {
     path: '/tool/gen-edit',
     component: Layout,
     hidden: true,
