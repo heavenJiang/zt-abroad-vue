@@ -92,8 +92,8 @@
       @pagination="getList"
     />
 
-    <!-- 测评详情：背景档案 + 答案 -->
-    <el-drawer v-model="viewOpen" :title="viewTitle" size="780px" append-to-body>
+    <!-- 测评详情：背景档案 + 选校结果 + 答案 -->
+    <el-drawer v-model="viewOpen" :title="viewTitle" size="960px" append-to-body>
       <template v-if="detail">
         <el-descriptions :column="3" border size="small">
           <el-descriptions-item label="状态"><dict-tag :options="abr_assessment_status" :value="detail.assessmentStatus" /></el-descriptions-item>
@@ -128,6 +128,82 @@
           </el-descriptions>
         </template>
 
+        <div class="block-title">
+          选校结果
+          <span v-if="result" class="text-muted">（{{ parseTime(result.computedTime) }} 计算，{{ versionText }}）</span>
+          <el-button v-if="detail.assessmentStatus === 'submitted'" link type="primary" icon="Refresh" @click="handleCompute(detail)" v-hasPermi="['abroad:assessment:compute']">{{ result ? "重新计算" : "计算" }}</el-button>
+        </div>
+        <el-empty v-if="!result" :description="detail.assessmentStatus === 'submitted' ? '尚未计算' : '学生提交后自动计算'" :image-size="60" />
+        <template v-else>
+          <el-alert v-if="result.skippedCountries" type="warning" :closable="false" show-icon class="mb4"
+            :title="'未计算：' + result.skippedCountries + '（没有启用的引擎配置）'" />
+          <el-alert v-for="(h, i) in resultHints" :key="i" type="info" :closable="false" show-icon class="mb4" :title="hintText(h)" />
+          <div class="mb4">
+            参与计算 {{ result.programCount }} 个项目：冲 {{ result.reachCount }} · 稳 {{ result.matchCount }} · 保 {{ result.safetyCount }} · 补足后可申 {{ result.needsImprovementCount }}
+            <span class="text-muted">（★ 为推荐组合；P 只在管理端显示）</span>
+          </div>
+          <el-table :data="resultRows" size="small" border max-height="420">
+            <el-table-column label="分组" align="center" width="96">
+              <template #default="scope">
+                <dict-tag :options="abr_selection_group" :value="scope.row.group" />
+              </template>
+            </el-table-column>
+            <el-table-column label="项目" min-width="200" :show-overflow-tooltip="true">
+              <template #default="scope">
+                <span v-if="portfolioIds.has(scope.row.programId)" class="star">★</span>
+                {{ scope.row.schoolName }} · {{ scope.row.programName }}
+                <span class="text-muted">{{ scope.row.country }} {{ scope.row.difficulty || "" }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="综合分 C" align="right" width="80" class-name="num" prop="c" />
+            <el-table-column label="P" align="right" width="70" class-name="num">
+              <template #default="scope">{{ scope.row.p != null ? (scope.row.p * 100).toFixed(1) + "%" : "-" }}</template>
+            </el-table-column>
+            <el-table-column label="参考线 T" align="right" width="110">
+              <template #default="scope">
+                <span v-if="scope.row.t != null">{{ scope.row.t }}</span>
+                <span v-else class="text-muted">缺</span>
+                <div class="text-muted small"><dict-tag v-if="scope.row.tSource" :options="abr_benchmark_source" :value="scope.row.tSource" /></div>
+              </template>
+            </el-table-column>
+            <el-table-column label="缺什么 / 提示" min-width="180">
+              <template #default="scope">
+                <el-tag v-for="m in scope.row.missing" :key="m" type="danger" size="small" class="mr4">{{ itemText(m) }}</el-tag>
+                <span class="text-muted small">{{ flagsText(scope.row.thresholdFlags) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="偏好分" align="right" width="70" class-name="num">
+              <template #default="scope">{{ scope.row.preferenceScore ?? "-" }}</template>
+            </el-table-column>
+            <el-table-column label="费用(万)" align="right" width="80" class-name="num">
+              <template #default="scope">
+                <span :class="{ 'text-danger': scope.row.overBudget }">{{ scope.row.costWan ?? "-" }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <template v-if="resultGaps.length">
+            <div class="block-title small-title">差距反算</div>
+            <el-table :data="resultGaps" size="small" border>
+              <el-table-column label="项目" min-width="160" :show-overflow-tooltip="true">
+                <template #default="scope">{{ programLabel(scope.row.programId) }}</template>
+              </el-table-column>
+              <el-table-column label="进稳档还差" align="right" width="100" class-name="num">
+                <template #default="scope">{{ scope.row.gapC != null ? scope.row.gapC + " 分" : "-" }}</template>
+              </el-table-column>
+              <el-table-column label="建议动作" min-width="200">
+                <template #default="scope">
+                  <span v-if="scope.row.plan.length">{{ scope.row.plan.map(actionText).join(" + ") }}（+{{ scope.row.planGain }} 分，{{ scope.row.planMonths }} 个月）</span>
+                  <span v-if="scope.row.requiredC != null && !scope.row.achievable" class="text-danger">全部动作也不够</span>
+                  <span v-if="scope.row.inTime === false" class="text-danger">，入学前来不及</span>
+                  <div v-for="f in scope.row.thresholdFixes" :key="f.item" class="small">
+                    {{ itemText(f.item) }}：{{ f.action ? actionText(f.action) + (f.steps > 1 ? " × " + f.steps : "") + "（约 " + f.months + " 个月）" : "不能靠短期动作补足" }}
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </template>
+        </template>
+
         <div class="block-title">答案（{{ answerRows.length }} 题）</div>
         <el-table :data="answerRows" size="small" border>
           <el-table-column label="题目" min-width="180" :show-overflow-tooltip="true">
@@ -148,11 +224,33 @@
 </template>
 
 <script setup name="Assessment">
-import { listAssessment, getAssessment, normalizeAssessment } from "@/api/abroad/assessment"
+import { listAssessment, getAssessment, normalizeAssessment, computeAssessment } from "@/api/abroad/assessment"
 import { getQuestionnaire } from "@/api/abroad/questionnaire"
 
 const { proxy } = getCurrentInstance()
-const { abr_assessment_status, abr_undergrad_tier, sys_yes_no } = useDict("abr_assessment_status", "abr_undergrad_tier", "sys_yes_no")
+const { abr_assessment_status, abr_undergrad_tier, sys_yes_no, abr_selection_group, abr_benchmark_source } = useDict(
+  "abr_assessment_status", "abr_undergrad_tier", "sys_yes_no", "abr_selection_group", "abr_benchmark_source"
+)
+
+// 硬门槛检查项（engine.HardThresholdChecker）
+const ITEM_TEXT = {
+  language_en: "英语", language_ja: "日语", language_ko: "韩语", language_de: "德语", tier_accepted: "本科层次",
+  gpa: "均分", prerequisites: "先修课", work_years: "工作年限", cross_major: "跨专业", aps: "APS", course_match: "课程匹配"
+}
+// 硬门槛提示码
+const FLAG_TEXT = {
+  requirement_unverified: "要求待核实", requirement_missing: "缺要求", language_pending: "语言待考", language_estimated: "预估分",
+  pre_sessional: "可读语言班", pre_sessional_unverified: "语言班待核实", tier_unknown: "层次待核定", gpa_missing: "缺均分",
+  prereq_to_verify: "先修课待核实", prereq_risk: "先修课风险", cross_major_unknown: "跨专业待核实", sub_score_unchecked: "小分未核",
+  german_to_verify: "德语待核实", aps_in_progress: "APS 审核中", aps_unknown: "APS 不了解", course_match_missing: "未解析成绩单"
+}
+// 差距反算动作
+const ACTION_TEXT = {
+  add_lab_research: "课题组经历", add_related_internship_3m: "3 个月相关实习", gre_plus_10: "GRE +10",
+  ielts_plus_0_5: "雅思 +0.5", do_aps: "办理 APS"
+}
+// 推荐方案提示（engine.RecommendationPlanner）
+const TIER_TEXT = { reach: "冲刺", match: "主攻", safety: "保底" }
 
 // 归一化提示码（engine.ProfileNormalizer / SubScoreCalculator）
 const WARNING_TEXT = {
@@ -176,6 +274,7 @@ const viewOpen = ref(false)
 const detail = ref(null)
 const profile = ref(null)
 const questionnaire = ref(null)
+const result = ref(null)
 
 const data = reactive({
   queryParams: {
@@ -213,6 +312,61 @@ const answerRows = computed(() => {
   })
   return rows
 })
+
+/** 选校结果：各项目（已按分组排序） */
+const resultRows = computed(() => parseJson(result.value && result.value.programs, []))
+
+/** 选校结果：推荐组合中的项目ID */
+const portfolioIds = computed(() => {
+  const p = parseJson(result.value && result.value.portfolio, {})
+  return new Set(Object.values(p).flat())
+})
+
+const resultGaps = computed(() => parseJson(result.value && result.value.gaps, []))
+const resultHints = computed(() => parseJson(result.value && result.value.hints, []))
+
+/** 所用引擎版本 */
+const versionText = computed(() => {
+  const v = parseJson(result.value && result.value.engineVersions, {})
+  const list = Object.values(v)
+  return list.length ? list.join("、") : "无启用配置"
+})
+
+function itemText(code) {
+  return ITEM_TEXT[code] || code
+}
+
+function actionText(code) {
+  return ACTION_TEXT[code] || code
+}
+
+function flagsText(flags) {
+  return (flags || []).filter(f => FLAG_TEXT[f]).map(f => FLAG_TEXT[f]).join("、")
+}
+
+function programLabel(id) {
+  const r = resultRows.value.find(x => x.programId === id)
+  return r ? r.schoolName + " · " + r.programName : "#" + id
+}
+
+/** 推荐方案提示文字 */
+function hintText(h) {
+  const d = h.detail || []
+  switch (h.code) {
+    case "tier_shortage":
+      return TIER_TEXT[d[0]] + "档不足，还差 " + d[1] + " 所"
+    case "no_safety_in_first_choice":
+      return "首选国家 / 地区 " + h.country + " 没有保底项目"
+    case "over_budget":
+      return d.length + " 个项目超出预算，未放入推荐组合"
+    case "mix_application":
+      return h.country + " 保底不足，建议与 " + d.join("、") + " 混申"
+    case "employment_data_missing":
+      return "学生选了“就业优先”，院校库暂无就业数据，这一项未计分"
+    default:
+      return h.code
+  }
+}
 
 /** 解析 JSON 文本 */
 function parseJson(text, fallback) {
@@ -271,6 +425,7 @@ function handleView(row) {
   getAssessment(row.assessmentId).then(response => {
     detail.value = response.data
     profile.value = response.profile
+    result.value = response.result
     viewOpen.value = true
     if (!questionnaire.value || questionnaire.value.id !== response.data.questionnaireId) {
       questionnaire.value = null
@@ -297,6 +452,21 @@ function handleNormalize(row, inDrawer) {
   }).catch(() => {})
 }
 
+/** 计算（或重新计算）选校结果 */
+function handleCompute(row) {
+  proxy.$modal.confirm("按当前启用的引擎配置、院校库与参考线重新计算测评 #" + row.assessmentId + " 的选校结果？会同时重新归一化。").then(() => {
+    return computeAssessment(row.assessmentId)
+  }).then(response => {
+    proxy.$modal.msgSuccess("已重新计算")
+    result.value = response.data
+    return getAssessment(row.assessmentId)
+  }).then(response => {
+    if (response) {
+      profile.value = response.profile
+    }
+  }).catch(() => {})
+}
+
 getList()
 </script>
 
@@ -313,6 +483,21 @@ getList()
 }
 .mb4 {
   margin-bottom: 4px;
+}
+.mr4 {
+  margin-right: 4px;
+}
+.small {
+  font-size: 12px;
+}
+.small-title {
+  font-size: 13px;
+}
+.star {
+  color: var(--el-color-warning);
+}
+.text-danger {
+  color: var(--el-color-danger);
 }
 .block-title {
   display: flex;

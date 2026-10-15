@@ -24,3 +24,11 @@ export function normalizeAssessment(assessmentId) {
     method: 'post'
   })
 }
+
+// 计算（或重新计算）选校结果（重新归一化后按启用的引擎配置、院校库与参考线计算）
+export function computeAssessment(assessmentId) {
+  return request({
+    url: '/abroad/assessment/' + assessmentId + '/compute',
+    method: 'post'
+  })
+}
