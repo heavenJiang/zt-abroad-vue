@@ -110,6 +110,13 @@
               <el-input-number v-model="current.ieltsMinSub" controls-position="right" :min="0" :max="9" :step="0.5" :precision="1" placeholder="未要求" style="width: 100%" />
             </el-form-item>
           </el-col>
+          <el-col :span="8">
+            <el-form-item label="接受语言班">
+              <el-radio-group v-model="current.acceptPreSessional">
+                <el-radio v-for="dict in abr_pre_sessional" :key="dict.value" :value="dict.value">{{ dict.label }}</el-radio>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
         </el-row>
         <el-form-item label="其他语言考试" :error="current.fieldErrors.otherLanguage">
           <el-table :data="current.otherLangs" size="small" border class="inner-table">
@@ -293,9 +300,10 @@ import AiPrefillPanel from "./aiPrefillPanel"
 const { proxy } = getCurrentInstance()
 const route = useRoute()
 const {
-  abr_country, abr_degree, abr_undergrad_tier, abr_test_requirement, abr_cross_major, abr_intake, sys_normal_disable
+  abr_country, abr_degree, abr_undergrad_tier, abr_test_requirement, abr_cross_major, abr_pre_sessional, abr_intake, sys_normal_disable
 } = useDict(
-  "abr_country", "abr_degree", "abr_undergrad_tier", "abr_test_requirement", "abr_cross_major", "abr_intake", "sys_normal_disable"
+  "abr_country", "abr_degree", "abr_undergrad_tier", "abr_test_requirement", "abr_cross_major", "abr_pre_sessional", "abr_intake",
+  "sys_normal_disable"
 )
 
 /**
@@ -330,6 +338,7 @@ const FIELD_LABELS = {
   ieltsOverall: "雅思总分",
   ieltsMinSub: "雅思小分",
   otherLanguage: "其他语言",
+  acceptPreSessional: "接受语言班",
   testRequirement: "标化要求",
   testDetail: "标化分数",
   prerequisites: "先修课",
@@ -341,7 +350,7 @@ const FIELD_LABELS = {
 /** 表单分组 → 组内字段（来源控件按组显示） */
 const GROUPS = {
   gpa: ["minGpa", "tiersNotAccepted"],
-  language: ["ieltsOverall", "ieltsMinSub", "otherLanguage"],
+  language: ["ieltsOverall", "ieltsMinSub", "otherLanguage", "acceptPreSessional"],
   test: ["testRequirement", "testDetail"],
   prerequisites: ["prerequisites"],
   other: ["workYears", "acceptCrossMajor"],
@@ -475,6 +484,7 @@ function toEditor(r) {
     prerequisitesRequired: r.prerequisitesRequired || "N",
     workYears: r.workYears ?? null,
     acceptCrossMajor: r.acceptCrossMajor || "2",
+    acceptPreSessional: r.acceptPreSessional || "2",
     rolling: !!dl.rolling,
     rounds: (dl.rounds || []).map(x => ({ name: x.name || "", date: x.date || "" })),
     sources: sources,
@@ -527,6 +537,7 @@ function toValues(ed) {
     prerequisites: isBlank(ed.prerequisites) ? null : ed.prerequisites.trim(),
     workYears: isBlank(ed.workYears) ? null : ed.workYears,
     acceptCrossMajor: ed.acceptCrossMajor || null,
+    acceptPreSessional: ed.acceptPreSessional || null,
     // 截止日形状：{"rolling":bool,"rounds":[{"name":"R1","date":"2027-01-15"}]}；不滚动且无轮次时为 null
     deadlines: ed.rolling || rounds.length ? JSON.stringify({ rolling: ed.rolling, rounds: rounds }) : null
   }
@@ -741,7 +752,8 @@ function compareReadBack(sent, saved) {
     prerequisites: sent.prerequisites,
     prerequisitesRequired: sent.prerequisitesRequired || "N",
     workYears: sent.workYears,
-    acceptCrossMajor: sent.acceptCrossMajor || "2"
+    acceptCrossMajor: sent.acceptCrossMajor || "2",
+    acceptPreSessional: sent.acceptPreSessional || "2"
   }
   jsonFields.forEach(f => {
     if (JSON.stringify(canonical(parseJson(sent[f]))) !== JSON.stringify(canonical(parseJson(saved[f])))) {
